@@ -4,20 +4,12 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.stream.Collectors;
 
-/**
- * Демонстрацiйна система бронювання квиткiв з використанням багатопоточностi,
- * Runnable, станiв потокiв та Semaphore для безпечного доступу.
- */
 public class TicketBookingDemo {
 
-    // ========================= МОДЕЛi/ВИНЯТКИ =========================
-
-    /** Виняток, коли бронювання закрито за часовим правилом. */
     static class BookingClosedException extends Exception {
         BookingClosedException(String message) { super(message); }
     }
 
-    /** Результат спроби бронювання для «людського» виводу. */
     static class BookingResult {
         final String clientName;
         final int requested;
@@ -50,33 +42,24 @@ public class TicketBookingDemo {
             }
         }
     }
-
-    // ========================= СЕРВiС БРОНЮВАННЯ =========================
-
-    /**
-     * Потокобезпечний сервiс складського типу: тут зберiгаються вiльнi квитки.
-     * Керування кiлькiстю — через Semaphore (спiльний лiчильник доступних мiсць).
-     */
     static class TicketInventory {
         private final Semaphore permits; // кiлькiсть доступних квиткiв
         private final ConcurrentLinkedQueue<Integer> freeTickets; // номери квиткiв
         private final ZoneId zone;
 
-        // Заборонене вiкно часу
         private static final LocalTime CLOSED_FROM = LocalTime.of(0, 0);
         private static final LocalTime CLOSED_TO   = LocalTime.of(6, 0);
 
         TicketInventory(int totalTickets, ZoneId zone) {
-            this.permits = new Semaphore(totalTickets, true); // "fair" — чесна черга
+            this.permits = new Semaphore(totalTickets, true);
             this.freeTickets = new ConcurrentLinkedQueue<>();
             for (int i = 1; i <= totalTickets; i++) freeTickets.add(i);
             this.zone = zone;
         }
 
-        /** Перевiрка, чи бронювання дозволено за часом. */
         private void ensureBookingOpen() throws BookingClosedException {
             LocalTime now = LocalTime.now(zone);
-            boolean closed = !now.isBefore(CLOSED_TO) ? false : true; // [00:00,06:00) закрито
+            boolean closed = !now.isBefore(CLOSED_TO) ? false : true;
             if (closed) {
                 String nowStr = now.format(DateTimeFormatter.ofPattern("HH:mm"));
                 throw new BookingClosedException(
@@ -85,23 +68,14 @@ public class TicketBookingDemo {
             }
         }
 
-        /**
-         * Спроба забронювати N квиткiв (все-або-нiчого).
-         * @param clientName iм’я клiєнта
-         * @param count кiлькiсть квиткiв
-         * @return результат бронювання
-         */
         BookingResult tryBook(String clientName, int count) {
             try {
-                // Валiдацiя вводу
                 if (count <= 0) {
                     return new BookingResult(clientName, count, null, false,
                             "Невiрна кiлькiсть квиткiв (" + count + "). Має бути 1 або бiльше.");
                 }
-                // Часове правило
                 ensureBookingOpen();
 
-                // Спроба забрати permits рiвно на count (без очiкування, щоб показати вiдмову, якщо не вистачає)
                 boolean acquired = permits.tryAcquire(count, 200, TimeUnit.MILLISECONDS);
                 if (!acquired) {
                     int available = permits.availablePermits();
@@ -109,21 +83,17 @@ public class TicketBookingDemo {
                             "Недостатньо вiльних квиткiв. Доступно зараз: " + available + ".");
                 }
 
-                // Якщо permits отриманi — фiзично видiляємо номери квиткiв.
                 List<Integer> allocated = new ArrayList<>(count);
                 for (int i = 0; i < count; i++) {
                     Integer ticket = freeTickets.poll();
                     if (ticket == null) {
-                        // Аварiйна ситуацiя (не має статися при коректнiй роботi з Semaphore)
-                        // Вiдкат: повертаємо вже узятi permits i номери
                         for (Integer t : allocated) freeTickets.add(t);
-                        permits.release(i); // повертаємо рiвно те, що встигли «забрати»
+                        permits.release(i); 
                         throw new IllegalStateException("Збiй видiлення квиткiв — неочiкувано закiнчились номери.");
                     }
                     allocated.add(ticket);
                 }
 
-                // Успiх
                 return new BookingResult(
                         clientName, count, allocated, true,
                         "Успiшно видiлено " + count + " квиткiв."
@@ -141,19 +111,17 @@ public class TicketBookingDemo {
             }
         }
 
-        /** Скiльки квиткiв лишилось. */
         int remaining() {
             return permits.availablePermits();
         }
     }
 
-    // ========================= КЛiЄНТ (Runnable) =========================
 
     static class BookingClient implements Runnable {
         private final String name;
         private final int requestCount;
         private final TicketInventory inventory;
-        private final List<BookingResult> sink; // куди складати результати
+        private final List<BookingResult> sink;
 
         BookingClient(String name, int requestCount, TicketInventory inventory, List<BookingResult> sink) {
             this.name = name;
@@ -165,7 +133,6 @@ public class TicketBookingDemo {
         @Override
         public void run() {
             try {
-                // (Додатково) невелика випадкова затримка, щоб перемiшати гонку потокiв
                 Thread.sleep(ThreadLocalRandom.current().nextInt(20, 120));
                 BookingResult result = inventory.tryBook(name, requestCount);
                 synchronized (sink) { sink.add(result); }
@@ -178,7 +145,6 @@ public class TicketBookingDemo {
         }
     }
 
-    // ========================= МОНiТОР СТАНiВ ПОТОКiВ =========================
 
     static class ThreadStateMonitor implements Runnable {
         private final List<Thread> threads;
@@ -204,10 +170,8 @@ public class TicketBookingDemo {
         }
     }
 
-    // ========================= MAIN (демонстрацiя) =========================
-
     public static void main(String[] args) {
-        final ZoneId zone = ZoneId.systemDefault(); // за потреби можна змiнити на ZoneId.of("Europe/Kyiv")
+        final ZoneId zone = ZoneId.systemDefault();
         final int TOTAL_TICKETS = 10;
 
         System.out.println("=== СИСТЕМА БРОНЮВАННЯ КВИТКiВ ===");
@@ -217,10 +181,8 @@ public class TicketBookingDemo {
 
         TicketInventory inventory = new TicketInventory(TOTAL_TICKETS, zone);
 
-        // Колекцiя для «людських» результатiв
         List<BookingResult> results = Collections.synchronizedList(new ArrayList<>());
 
-        // Створюємо клiєнтiв (потоки). iмена та запити рiзнi — щоб побачити конкуренцiю.
         List<Thread> clients = new ArrayList<>();
         clients.add(new Thread(new BookingClient("Олена", 3, inventory, results), "Client-Олена"));
         clients.add(new Thread(new BookingClient("Артем", 4, inventory, results), "Client-Артем"));
@@ -228,30 +190,25 @@ public class TicketBookingDemo {
         clients.add(new Thread(new BookingClient("Сергiй", 5, inventory, results), "Client-Сергiй"));
         clients.add(new Thread(new BookingClient("Наталя", 1, inventory, results), "Client-Наталя"));
 
-        // Показуємо початковi стани
         System.out.println("Початковi стани потокiв:");
         for (Thread t : clients) {
             System.out.println(" - " + t.getName() + " -> " + t.getState()); // NEW
         }
         System.out.println();
 
-        // Запускаємо монiтор станiв
         ThreadStateMonitor monitor = new ThreadStateMonitor(clients);
         Thread monitorThread = new Thread(monitor, "ThreadStateMonitor");
         monitorThread.setDaemon(true);
         monitorThread.start();
 
-        // Стартуємо клiєнтiв
         clients.forEach(Thread::start);
 
-        // Пiсля старту — короткий зрiз станiв
         System.out.println("Стани вiдразу пiсля старту:");
         for (Thread t : clients) {
             System.out.println(" - " + t.getName() + " -> " + t.getState()); // RUNNABLE/…
         }
         System.out.println();
 
-        // Чекаємо завершення
         for (Thread t : clients) {
             try {
                 t.join();
@@ -262,17 +219,16 @@ public class TicketBookingDemo {
         }
         monitor.stop();
 
-        // Показуємо фiнальнi стани
         System.out.println("Фiнальнi стани потокiв:");
         for (Thread t : clients) {
             System.out.println(" - " + t.getName() + " -> " + t.getState()); // TERMINATED
         }
         System.out.println();
 
-        // «Людський» звiт
         System.out.println("=== ПiДСУМКИ ДЛЯ КОРИСТУВАЧА ===");
         results.forEach(r -> System.out.println(r.humanReadable()));
         System.out.println("\nЗалишок вiльних квиткiв: " + inventory.remaining());
         System.out.println("Дякуємо! Якщо квиткiв не вистачило — спробуйте змiнити кiлькiсть або час.");
     }
 }
+
