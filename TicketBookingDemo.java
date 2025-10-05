@@ -39,12 +39,12 @@ public class TicketBookingDemo {
                         .sorted()
                         .map(String::valueOf)
                         .collect(Collectors.joining(", "));
-                return "✅ Клiєнт: " + clientName +
+                return "+ Клiєнт: " + clientName +
                         " | Запитано: " + requested +
                         " | Видано квитки №: [" + tickets + "]" +
                         " | Статус: ПiДТВЕРДЖЕНО.";
             } else {
-                return "❌ Клiєнт: " + clientName +
+                return "- Клiєнт: " + clientName +
                         " | Запитано: " + requested +
                         " | Статус: ВiДХИЛЕНО. Причина: " + message;
             }
@@ -276,3 +276,4 @@ public class TicketBookingDemo {
         System.out.println("Дякуємо! Якщо квиткiв не вистачило — спробуйте змiнити кiлькiсть або час.");
     }
 }
+
